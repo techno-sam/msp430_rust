@@ -12,3 +12,6 @@ shared_memory = "0.12.4"
 base64 = "0.21.4"
 libc = "0.2.0"
 num_enum = "0.7.0"
+
+[profile.test] # fixed
+opt-level = 2

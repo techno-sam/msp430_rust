@@ -24,6 +24,19 @@ impl BasicRegister {
     }
 }
 
+struct EvenRegister {
+    id: u8,
+    _value: u16
+}
+impl EvenRegister {
+    fn new(id: u8) -> EvenRegister {
+        return EvenRegister {
+            id,
+            _value: 0
+        };
+    }
+}
+
 struct StatusRegister {
     _value: u16
 }
@@ -46,6 +59,28 @@ impl RegisterData for BasicRegister {
         self._value = (value & 0xff).try_into().unwrap();
     }
     
+    fn get_id(&self) -> u8 {
+        return self.id;
+    }
+}
+
+impl RegisterData for EvenRegister {
+    fn get_word(&self) -> u16 {
+        return self._value;
+    }
+
+    fn get_byte(&self) -> u8 {
+        return (self._value & 0xff).try_into().unwrap();
+    }
+
+    fn set_word(&mut self, value: u16) {
+        self._value = value & 0xfffe;
+    }
+
+    fn set_byte(&mut self, value: u8) {
+        self._value = (value & 0xfe).try_into().unwrap();
+    }
+
     fn get_id(&self) -> u8 {
         return self.id;
     }
@@ -290,8 +325,8 @@ enum DoubleOperandOpcodes {
 struct Computer {
     numbered_registers: [BasicRegister; 12],
     memory: MemoryMap,
-    pc: BasicRegister,
-    sp: BasicRegister,
+    pc: EvenRegister,
+    sp: EvenRegister,
     sr: StatusRegister,
     cg: ConstantGeneratorRegister
 }
@@ -299,8 +334,8 @@ struct Computer {
 #[allow(dead_code)]
 impl Computer {
     fn new() -> Computer {
-        let pc: BasicRegister = BasicRegister::new(0);
-        let sp: BasicRegister = BasicRegister::new(1);
+        let pc: EvenRegister = EvenRegister::new(0); // TODO: PC needs something to be word-aligned
+        let sp: EvenRegister = EvenRegister::new(1); // TODO: ditto
         let sr: StatusRegister = StatusRegister::new();
         let cg: ConstantGeneratorRegister = ConstantGeneratorRegister::new();
         let numbered_registers: &mut [BasicRegister; 12] = &mut [BasicRegister::new(255); 12];
@@ -399,12 +434,14 @@ impl Computer {
     }
 
     fn _get_src(&mut self, src_reg: u8, as_: u8, bw: bool) -> (u16, Box<WriteTargets>) {
+        // FIXME: this needs to be able to handle absolute mode
         let src: &mut u16 = &mut 0;
-        if src_reg == 3 || (src_reg == 2 && as_ != 0) { // CG (or SR outside of Register mode)
+        if src_reg == 3 || (src_reg == 2 && as_ > 1) { // CG (or SR outside of Register or Indexed modes)
             if src_reg == 2 {
-                if as_ == 1 {
+                /*if as_ == 1 { // FIXME: this is WRONG, it is NOT 0, but absolute mode RETURN memory
+                              // @ next word, then increment pc, or something idk
                     *src = 0;
-                } else if as_ == 2 {
+                } else */if as_ == 2 {
                     *src = 4;
                 } else if as_ == 3 {
                     *src = 8;
@@ -423,31 +460,36 @@ impl Computer {
             return (*src, Box::new(WriteTargets::VOID));
         }
         
-        if as_ == 0 {
+        if as_ == 0 { // Register Mode
             if bw {
                 *src = self.get_register(src_reg).get_byte() as u16;
             } else {
                 *src = self.get_register(src_reg).get_word();
             }
             return (*src, RegisterWriteTarget::new_boxed(src_reg));
-        } else if as_ == 1 {
-            let offset: u16 = self.memory.get_word(self.pc.get_word()) + self.get_register(src_reg).get_word();
-            self.pc.set_word(self.pc.get_word() + 2);
+        } else if as_ == 1 { // Indexed Mode
+            let offset: u16;
+            if src_reg == 2 { // Special-Case Absolute Mode
+                offset = self.memory.get_word(self.pc.get_word()); // NOTE: not adding src reg
+            } else {
+                offset = self.memory.get_word(self.pc.get_word()).wrapping_add(self.get_register(src_reg).get_word());
+            }
+            self.pc.set_word(self.pc.get_word().wrapping_add(2));
             *src = if bw {self.memory.get_byte(offset) as u16} else {self.memory.get_word(offset)};
             return (*src, MemoryWriteTarget::new_boxed(offset));
-        } else if as_ == 2 {
+        } else if as_ == 2 { // Register Indirect Mode
             let target: u16 = self.get_register(src_reg).get_word();
             *src = if bw {self.memory.get_byte(target) as u16} else {self.memory.get_word(target)};
             return (*src, MemoryWriteTarget::new_boxed(target));
-        } else if as_ == 3 {
+        } else if as_ == 3 { // Register Indirect Autoincrement Mode
             let mem_target: u16 = self.get_register(src_reg).get_word();
             if bw {
                 *src = self.memory.get_byte(mem_target) as u16;
                 let extra: u16 = (src_reg == 0 || src_reg == 1) as u16; // PC or SP
-                self.get_register(src_reg).set_word(mem_target + 1 + extra);
+                self.get_register(src_reg).set_word(mem_target.wrapping_add(1).wrapping_add(extra));
             } else {
                 *src = self.memory.get_word(mem_target);
-                self.get_register(src_reg).set_word(mem_target + 2);
+                self.get_register(src_reg).set_word(mem_target.wrapping_add(2));
             }
             return (*src, MemoryWriteTarget::new_boxed(mem_target));
         } else {
@@ -474,8 +516,8 @@ impl Computer {
         let opc: SingleOperandOpcodes = SingleOperandOpcodes::try_from(opcode).unwrap();
         
         match opc {
-            SingleOperandOpcodes::RRC => {
-                let carry: bool = *src & 1 == 1;
+            SingleOperandOpcodes::RRC => { // NOTE: tested
+                let carry: bool = (*src & 1) == 1;
                 *src >>= 1;
                 // put carry back in, taking into account byte-mode as bw
                 *src |= (self.sr.get_status(StatusFlags::CARRY) as u16) << bw_num;
@@ -485,12 +527,12 @@ impl Computer {
                 self.sr.set_status(StatusFlags::ZERO, *src == 0);
                 self.sr.set_status(StatusFlags::OVERFLOW, false);
             },
-            SingleOperandOpcodes::SWPB => {
+            SingleOperandOpcodes::SWPB => { // NOTE: tested
                 if !bw {
                     *src = ((*src & 0xff00) >> 8) | ((*src & 0xff) << 8);
                 }
             },
-            SingleOperandOpcodes::RRA => {
+            SingleOperandOpcodes::RRA => { // NOTE: tested
                 self.sr.set_status(StatusFlags::CARRY, *src & 1 == 1);
                 let msb_to_or: u16 = *src & (if bw {128} else {32768});
                 *src >>= 1;
@@ -499,7 +541,7 @@ impl Computer {
                 self.sr.set_status(StatusFlags::ZERO, *src == 0);
                 self.sr.set_status(StatusFlags::OVERFLOW, false);
             },
-            SingleOperandOpcodes::SXT => {
+            SingleOperandOpcodes::SXT => { // NOTE: tested
                 if !bw {
                     *src &= 0xff;
                     if (*src >> 7 & 1) == 1 {
@@ -513,36 +555,43 @@ impl Computer {
                     self.sr.set_status(StatusFlags::OVERFLOW, false);
                 }
             },
-            SingleOperandOpcodes::PUSH => {
+            SingleOperandOpcodes::PUSH => { // NOTE: tested (indirectly) by other tests
+                let mut sp_word: u16 = self.sp.get_word();
                 match *wt {
                     WriteTargets::REGISTER(wt_reg) => {
                         if wt_reg.register == 0 { // PC
                             if bw {
                                 *src = self.pc.get_byte() as u16;
                             } else {
-                                *src = self.pc.get_word();
+                                *src = sp_word;
                             }
                         }
                     },
                     _ => {}, // intentionally left blank
                 }
-                self.sp.set_word(self.sp.get_word() - 2);
+                if sp_word <= 1 {
+                    //panic!("MSP430 CPU Stack overflow");
+                    sp_word += 0xffff - 2;
+                } else {
+                    sp_word -= 2;
+                }
+                self.sp.set_word(sp_word);
                 *no_write = true;
                 if bw {
-                    self.memory.set_byte(self.sp.get_word(), (*src & 0xff) as u8);
+                    self.memory.set_byte(sp_word, (*src & 0xff) as u8);
                 } else {
-                    self.memory.set_word(self.sp.get_word(), *src);
+                    self.memory.set_word(sp_word, *src);
                 }
             },
-            SingleOperandOpcodes::CALL => {
+            SingleOperandOpcodes::CALL => { // TODO: test
                 if !bw {
-                    self.sp.set_word(self.sp.get_word() - 2);
+                    self.sp.set_word(self.sp.get_word().wrapping_sub(2));
                     self.memory.set_word(self.sp.get_word(), self.pc.get_word());
                     self.pc.set_word(*src);
                     *no_write = true;
                 }
             },
-            SingleOperandOpcodes::RETI => {
+            SingleOperandOpcodes::RETI => { // TODO: IMPLEMENT INTERRUPTS
                 todo!();
             }
         }
@@ -603,49 +652,54 @@ impl Computer {
 
         let no_write: &mut bool = &mut false;
 
+        //println!("opcode: {}", opcode);
         let opc: DoubleOperandOpcodes = DoubleOperandOpcodes::try_from(opcode - 4).unwrap();
+        //println!("opc: {:#?}", opc);
 
         let cutoff: u32 = if bw {0xff} else {0xffff};
 
         match opc {
-            DoubleOperandOpcodes::MOV => {
+            DoubleOperandOpcodes::MOV => { // NOTE: tested
                 *dst = src;
             },
-            DoubleOperandOpcodes::ADD => {
+            DoubleOperandOpcodes::ADD => { // NOTE: tested
                 let prev_dst: u16 = *dst;
                 let full_dst: u32 = (*dst as u32) + (src as u32);
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
-            DoubleOperandOpcodes::ADDC => {
+            DoubleOperandOpcodes::ADDC => { // NOTE: tested
                 let prev_dst: u16 = *dst;
                 let full_dst: u32 = (*dst as u32) + (src as u32) + (self.sr.get_status(StatusFlags::CARRY) as u32);
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
-            DoubleOperandOpcodes::SUBC => {
+            DoubleOperandOpcodes::SUBC => { // NOTE: Fuzzed
                 let prev_dst: u16 = *dst;
-                let full_dst: u32 = (*dst as u32) - (src as u32) - 1 + (self.sr.get_status(StatusFlags::CARRY) as u32);
+                // dst - src - 1 + sr(CARRY)
+                let full_dst: u32 = (*dst as u32).wrapping_sub(src as u32)
+                    .wrapping_sub(1).wrapping_add(self.sr.get_status(StatusFlags::CARRY) as u32);
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
-            DoubleOperandOpcodes::SUB => {
+            DoubleOperandOpcodes::SUB => { // NOTE: tested & fuzzed
                 let prev_dst: u16 = *dst;
-                let full_dst: u32 = (*dst as u32) - (src as u32);
+                //println!("SUB running {} - {}", *dst, src);
+                let full_dst: u32 = (*dst as u32).wrapping_sub(src as u32);
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
-            DoubleOperandOpcodes::CMP => {
+            DoubleOperandOpcodes::CMP => { // NOTE: not tested, but same impl as SUB
                 let prev_dst: u16 = *dst;
-                let full_dst: u32 = (*dst as u32) - (src as u32);
+                let full_dst: u32 = (*dst as u32).wrapping_sub(src as u32);
                 let fake_dst: u16 = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, fake_dst, bw);
                 *no_write = true;
             },
-            DoubleOperandOpcodes::DADD => {
+            DoubleOperandOpcodes::DADD => { // NOTE: Doesn't need testing
                 panic!("AHhhhhhhhhhhhhhhhhhhh I have no clue how DADD works.");
             },
-            DoubleOperandOpcodes::BIT => {
+            DoubleOperandOpcodes::BIT => { // NOTE: not tested, but same impl as AND
                 let prev_dst: u16 = *dst;
                 let full_dst: u32 = (*dst & src) as u32;
                 let fake_dst: u16 = (full_dst & cutoff) as u16;
@@ -654,13 +708,13 @@ impl Computer {
                 self.sr.set_status(StatusFlags::OVERFLOW, false);
                 *no_write = true;
             },
-            DoubleOperandOpcodes::BIC => {
+            DoubleOperandOpcodes::BIC => { // NOTE: tested
                 *dst &= !src;
             },
-            DoubleOperandOpcodes::BIS => {
+            DoubleOperandOpcodes::BIS => { // NOTE: tested
                 *dst |= src;
             },
-            DoubleOperandOpcodes::XOR => {
+            DoubleOperandOpcodes::XOR => { // NOTE: tested
                 let prev_dst: u16 = *dst;
                 *dst ^= src;
                 self.sr.set_status(StatusFlags::NEGATIVE, (*dst >> byte_int & 1) == 1);
@@ -668,7 +722,7 @@ impl Computer {
                 self.sr.set_status(StatusFlags::CARRY, *dst != 0);
                 self.sr.set_status(StatusFlags::OVERFLOW, (src >> byte_int & 1) == 1 && (prev_dst >> byte_int & 1) == 1);
             },
-            DoubleOperandOpcodes::AND => {
+            DoubleOperandOpcodes::AND => { // NOTE: tested
                 *dst &= src;
                 self.sr.set_status(StatusFlags::NEGATIVE, (*dst >> byte_int & 1) == 1);
                 self.sr.set_status(StatusFlags::ZERO, *dst == 0);
