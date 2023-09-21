@@ -434,14 +434,10 @@ impl Computer {
     }
 
     fn _get_src(&mut self, src_reg: u8, as_: u8, bw: bool) -> (u16, Box<WriteTargets>) {
-        // FIXME: this needs to be able to handle absolute mode
         let src: &mut u16 = &mut 0;
         if src_reg == 3 || (src_reg == 2 && as_ > 1) { // CG (or SR outside of Register or Indexed modes)
             if src_reg == 2 {
-                /*if as_ == 1 { // FIXME: this is WRONG, it is NOT 0, but absolute mode RETURN memory
-                              // @ next word, then increment pc, or something idk
-                    *src = 0;
-                } else */if as_ == 2 {
+                if as_ == 2 {
                     *src = 4;
                 } else if as_ == 3 {
                     *src = 8;
