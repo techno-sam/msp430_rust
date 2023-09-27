@@ -2,6 +2,10 @@
 name = "msp430_rust"
 version = "0.1.0"
 edition = "2021"
+description = "An emulator for the MSP430-2xx series computer chip"
+authors = ["Sam Wagenaar"]
+license = "GPL v3"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,6 +16,10 @@ shared_memory = "0.12.4"
 base64 = "0.21.4"
 libc = "0.2.0"
 num_enum = "0.7.0"
+clap = { version = "4.4.5", features = ["derive"] }
+
+[profile.dev]
+opt-level = 2
 
 [profile.test] # fixed
 opt-level = 2

@@ -1,84 +1,5 @@
 use super::*;
-use base64::{Engine as _, engine::general_purpose};
-use std::io::prelude::*;
-use std::process::{Command, Stdio};
-
-fn decode_2complement(v: u16) -> i32 {
-    if v > 0x7fff {
-        return (v as i32) - 0x10000;
-    } else {
-        return v as i32;
-    }
-}
-
-fn encode_2complement(v: i32) -> u16 {
-    if v < 0 {
-        return ((v + 0x10000) & 0xffff) as u16;
-    } else {
-        return (v & 0xffff) as u16;
-    }
-}
-
-fn wrap_2complement(v: i32) -> i32 {
-    return decode_2complement(encode_2complement(v));
-}
-
-fn assemble(code: &str) -> String {
-    let mut child = Command::new("./tools/assembler")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to run assembler");
-    child.stdin.take().unwrap().write_all(code.as_bytes()).expect("Failed to write code to assembler");
-    let mut buf: String = "".to_string();
-    child.stdout.take().unwrap().read_to_string(&mut buf).expect("Failed to receive assembled bytes back");
-
-    if buf.starts_with("<FAILURE>") {
-        panic!("  Failed to assemble `{}`  ", code);
-    }
-
-    return buf;
-}
-
-fn execute(computer: &mut Computer, data: &str, steps: u64) {
-    computer.reset();
-    execute_nr(computer, data, steps);
-}
-
-#[allow(dead_code)]
-fn execute_nd(computer: &mut Computer, byte_data: &[u8], steps: u64) {
-    computer.reset();
-    execute_nr_nd(computer, byte_data, steps);
-}
-
-fn execute_nr(computer: &mut Computer, data: &str, steps: u64) {
-    let byte_data: Vec<u8> = match general_purpose::STANDARD.decode(data) {
-        Ok(v) => v,
-        Err(_) => panic!("Failed to decode memory")
-    };
-    execute_nr_nd(computer, &byte_data, steps);
-}
-
-fn execute_nr_nd(computer: &mut Computer, byte_data: &[u8], steps: u64) { // no reset
-    /*let byte_data: Vec<u8> = match general_purpose::STANDARD.decode(data) {
-        Ok(v) => v,
-        Err(_) => panic!("Failed to decode memory")
-    };*/
-
-    let start: u16 = ((byte_data[0] as u16) << 8) + (byte_data[1] as u16);
-    computer.pc.set_word(start - 2);
-    
-    for i in 2..byte_data.len() {
-        let idx = (((start as usize) + i - 2) & 0xffff) as u16;
-        let val = byte_data[i];
-        //println!("idx={}, val={}", idx, val);
-        computer.memory.set_byte(idx, val);
-    }
-
-    for _ in 0..=steps {
-        computer.step();
-    }
-}
+use utils::{assemble, execute, encode_2complement, decode_2complement, wrap_2complement, execute_nr_nd};
 
 #[test]
 fn register_truncation() {
@@ -117,7 +38,7 @@ mov #8 r15
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 14); // WARN: need to increase this value when an instruction is added
+    execute(c, &trimmed, 14); // need to increase this value when an instruction is added
     assert_eq!(0xf00d, c.get_register(6).get_word(), "Basic register");
     assert_eq!(0xc0de, c.memory.get_word(0xf00d), "Indexed");
     assert_eq!(0xc0de, c.get_register(7).get_word(), "Indirect");
@@ -141,7 +62,7 @@ mov &0xc0de r5
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 2); // WARN: See above
+    execute(c, &trimmed, 2);
 
     assert_eq!(0xf00d, c.memory.get_word(0xc0de), "Absolute as target");
     assert_eq!(0xf00d, c.get_register(5).get_word(), "Absolute as source");
@@ -168,7 +89,7 @@ pop sr  ; restore flags
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 11); // WARN: See above
+    execute(c, &trimmed, 11);
     assert_eq!(3, c.get_register(6).get_word(), "Basic addition");
     assert_eq!(0, c.get_register(9).get_word(), "Carry: Antiexample");
     
@@ -202,7 +123,7 @@ sub r9 r10
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 9); // WARN: See above
+    execute(c, &trimmed, 9);
 
     assert_eq!(2, c.get_register(6).get_word());
     assert_eq!(2, c.get_register(8).get_word());
@@ -219,7 +140,7 @@ bic r5 r6
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 3); // WARN: See above
+    execute(c, &trimmed, 3);
 
     assert_eq!(0x00f0, c.get_register(6).get_word());
 }
@@ -234,7 +155,7 @@ bis r5 r6
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 3); // WARN: See above
+    execute(c, &trimmed, 3);
 
     assert_eq!(0xfff0, c.get_register(6).get_word());
 }
@@ -249,7 +170,7 @@ xor r5 r6
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 3); // WARN: See above
+    execute(c, &trimmed, 3);
 
     assert_eq!(0xf0f0, c.get_register(6).get_word());
 }
@@ -264,7 +185,7 @@ and r5 r6
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 3); // WARN: See above
+    execute(c, &trimmed, 3);
 
     assert_eq!(0x0f00, c.get_register(6).get_word());
 }
@@ -289,7 +210,7 @@ pop sr
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 9); // WARN: See above
+    execute(c, &trimmed, 9);
 
     assert_eq!(8, c.get_register(6).get_word(), "RRC (part 1)");
     assert_eq!(false, c.sr.get_status(StatusFlags::CARRY), "Flags: C");
@@ -306,7 +227,7 @@ swpb r6
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 2); // WARN: See above
+    execute(c, &trimmed, 2);
 
     assert_eq!(0x00ff, c.get_register(6).get_word());
 }
@@ -322,7 +243,7 @@ sxt r6
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 4); // WARN: See above
+    execute(c, &trimmed, 4);
 
     assert_eq!(0x000e, c.get_register(5).get_word());
     assert_eq!(0xfffe, c.get_register(6).get_word());
@@ -346,17 +267,306 @@ mov #0x0 r5 ; should never reach here
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 10); // WARN: See above
+    execute(c, &trimmed, 10);
 
     assert_eq!(0xc0de, c.get_register(5).get_word(), "Target gets called");
     assert_eq!(0xf00d, c.get_register(6).get_word(), "Return operates properly");
+}
+
+#[test]
+fn jc_jhs() { // jump if carry is set
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble("
+clrc
+jc b ; skip a if carry set (it isn't set, so nothing happens here)
+a:
+mov #0x1 r5
+b:
+mov #0x1 r6
+
+setc
+jc d ; skip c if carry set (it is)
+c:
+mov #0x1 r7
+d:
+mov #0x1 r8
+");
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 10);
+
+    assert_eq!(1, c.get_register(5).get_word(), "r5");
+    assert_eq!(1, c.get_register(6).get_word(), "r6");
+    
+    assert_eq!(0, c.get_register(7).get_word(), "r7");
+    assert_eq!(1, c.get_register(8).get_word(), "r8");
+}
+
+#[test]
+fn jeq_jz() { // jump if zero is set
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble("
+clrz
+jeq b ; skip a if zero set (it isn't set, so nothing happens here)
+a:
+mov #0x1 r5
+b:
+mov #0x1 r6
+
+setz
+jeq d ; skip c if zero set (it is)
+c:
+mov #0x1 r7
+d:
+mov #0x1 r8
+");
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 10);
+
+    assert_eq!(1, c.get_register(5).get_word(), "r5");
+    assert_eq!(1, c.get_register(6).get_word(), "r6");
+    
+    assert_eq!(0, c.get_register(7).get_word(), "r7");
+    assert_eq!(1, c.get_register(8).get_word(), "r8");
+}
+
+#[test]
+fn jge() { // jump if !(n ^ v)
+    /*
+    N|V|Jumps|
+    0|0|True |
+    0|1|False|
+    1|0|False|
+    1|1|True |
+    */
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble(r#"
+.define "bic #256,sr", clrv
+.define "bis #256,sr", setv
+clrn
+[clrv]
+jge b ; skip a? True
+a:
+mov #0x1 r5
+b:
+mov #0x1 r6
+
+clrn
+[setv]
+jge d ; skip c? False
+c:
+mov #0x1 r7
+d:
+mov #0x1 r8
+
+setn
+[clrv]
+jge f ; skip e? False
+e:
+mov #0x1 r9
+f:
+mov #0x1 r10
+
+setn
+[setv]
+jge h ; skip g? True
+g:
+mov #0x1 r11
+h:
+mov #0x1 r12
+"#);
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 20);
+
+    assert_eq!(0, c.get_register(5).get_word(), "r5 a");
+    assert_eq!(1, c.get_register(6).get_word(), "r6 b");
+    
+    assert_eq!(1, c.get_register(7).get_word(), "r7 c");
+    assert_eq!(1, c.get_register(8).get_word(), "r8 d");
+    
+    assert_eq!(1, c.get_register(9).get_word(), "r9 e");
+    assert_eq!(1, c.get_register(10).get_word(), "r10 f");
+    
+    assert_eq!(0, c.get_register(11).get_word(), "r11 g");
+    assert_eq!(1, c.get_register(12).get_word(), "r12 h");
+}
+
+#[test]
+fn jl() { // jump if (n ^ v)
+    /*
+    N|V|Jumps|
+    0|0|False|
+    0|1|True |
+    1|0|True |
+    1|1|False|
+    */
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble(r#"
+.define "bic #256,sr", clrv
+.define "bis #256,sr", setv
+clrn
+[clrv]
+jl b ; skip a? False
+a:
+mov #0x1 r5
+b:
+mov #0x1 r6
+
+clrn
+[setv]
+jl d ; skip c? True
+c:
+mov #0x1 r7
+d:
+mov #0x1 r8
+
+setn
+[clrv]
+jl f ; skip e? True
+e:
+mov #0x1 r9
+f:
+mov #0x1 r10
+
+setn
+[setv]
+jl h ; skip g? False
+g:
+mov #0x1 r11
+h:
+mov #0x1 r12
+"#);
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 20);
+
+    assert_eq!(1, c.get_register(5).get_word(), "r5 a");
+    assert_eq!(1, c.get_register(6).get_word(), "r6 b");
+    
+    assert_eq!(0, c.get_register(7).get_word(), "r7 c");
+    assert_eq!(1, c.get_register(8).get_word(), "r8 d");
+    
+    assert_eq!(0, c.get_register(9).get_word(), "r9 e");
+    assert_eq!(1, c.get_register(10).get_word(), "r10 f");
+    
+    assert_eq!(1, c.get_register(11).get_word(), "r11 g");
+    assert_eq!(1, c.get_register(12).get_word(), "r12 h");
+}
+
+#[test]
+fn jmp() { // unconditional jump
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble("
+jmp b ; skip a
+a:
+mov #0x1 r5
+b:
+mov #0x1 r6
+");
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 5);
+
+    assert_eq!(0, c.get_register(5).get_word(), "r5");
+    assert_eq!(1, c.get_register(6).get_word(), "r6");
+}
+
+#[test]
+fn jn() { // jump if negative
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble("
+clrn
+jn b ; don't skip a
+a:
+mov #0x1 r5
+b:
+mov #0x1 r6
+
+setn
+jn d ; skip c
+c:
+mov #0x1 r7
+d:
+mov #0x1 r8
+");
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 10);
+
+    assert_eq!(1, c.get_register(5).get_word(), "r5");
+    assert_eq!(1, c.get_register(6).get_word(), "r6");
+    
+    assert_eq!(0, c.get_register(7).get_word(), "r7");
+    assert_eq!(1, c.get_register(8).get_word(), "r8");
+}
+
+#[test]
+fn jnc_jlo() { // jump if !carry
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble("
+clrc
+jnc b ; skip a
+a:
+mov #0x1 r5
+b:
+mov #0x1 r6
+
+setc
+jnc d ; dont' skip c
+c:
+mov #0x1 r7
+d:
+mov #0x1 r8
+");
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 10);
+
+    assert_eq!(0, c.get_register(5).get_word(), "r5");
+    assert_eq!(1, c.get_register(6).get_word(), "r6");
+    
+    assert_eq!(1, c.get_register(7).get_word(), "r7");
+    assert_eq!(1, c.get_register(8).get_word(), "r8");
+}
+
+
+
+#[test]
+fn jne_jnz() { // jump if !zero
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble("
+clrz
+jnz b ; skip a
+a:
+mov #0x1 r5
+b:
+mov #0x1 r6
+
+setz
+jnz d ; dont' skip c
+c:
+mov #0x1 r7
+d:
+mov #0x1 r8
+");
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 10);
+
+    assert_eq!(0, c.get_register(5).get_word(), "r5");
+    assert_eq!(1, c.get_register(6).get_word(), "r6");
+    
+    assert_eq!(1, c.get_register(7).get_word(), "r7");
+    assert_eq!(1, c.get_register(8).get_word(), "r8");
 }
 
 /***********/
 /* Fuzzing */
 /***********/
 
-// WARN: this does 4.2 billion assembly + emulation runs (which takes 7.5 minutes)
+// this does 4.2 billion assembly + emulation runs (which takes 7.5 minutes)
 #[test]
 #[ignore]
 fn sub_fuzz() {
@@ -395,7 +605,7 @@ sub r5 r6
     }
 }
 
-// WARN: this does 4.2 billion assembly + emulation runs (which takes 7.5 minutes)
+// this does 4.2 billion assembly + emulation runs (which takes 7.5 minutes)
 #[test]
 #[ignore]
 fn subc_off_fuzz() {
@@ -424,7 +634,7 @@ fn subc_off_fuzz() {
     }
 }
 
-// WARN: this does 4.2 billion assembly + emulation runs (which takes 7.5 minutes)
+// this does 4.2 billion assembly + emulation runs (which takes 7.5 minutes)
 #[test]
 #[ignore]
 fn subc_on_fuzz() {
@@ -451,12 +661,4 @@ fn subc_on_fuzz() {
             assert_eq!(expected_result, decode_2complement(c.get_register(6).get_word()), "Fuzzing");
         }
     }
-}
-
-#[allow(dead_code)]
-fn t() {
-    // TODO: more testing for subc, there might still be some panics
-    
-    // TODO: for sub/subc, have a normal subtraction and an overflowing subtraction (may require signed
-    // magic)
 }

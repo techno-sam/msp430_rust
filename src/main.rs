@@ -1,5 +1,15 @@
+use std::time::Instant;
+
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
+use clap::Parser;
+//use shared_memory::{Shmem, ShmemConf};
+
+#[derive(Parser)]
+#[clap(author, version, about)]
+enum CLI {
+    Benchmark,
+}
 
 trait RegisterData {
     fn get_word(&self) -> u16;
@@ -334,8 +344,8 @@ struct Computer {
 #[allow(dead_code)]
 impl Computer {
     fn new() -> Computer {
-        let pc: EvenRegister = EvenRegister::new(0); // TODO: PC needs something to be word-aligned
-        let sp: EvenRegister = EvenRegister::new(1); // TODO: ditto
+        let pc: EvenRegister = EvenRegister::new(0);
+        let sp: EvenRegister = EvenRegister::new(1);
         let sr: StatusRegister = StatusRegister::new();
         let cg: ConstantGeneratorRegister = ConstantGeneratorRegister::new();
         let numbered_registers: &mut [BasicRegister; 12] = &mut [BasicRegister::new(255); 12];
@@ -396,8 +406,8 @@ impl Computer {
         }
     }
 
-    fn _execute_jump(&mut self, instruction: u16) {
-        let offset: &mut i32 = &mut (instruction as i32);
+    fn _execute_jump(&mut self, instruction: u16) { // all of this is tested
+        let offset: &mut i32 = &mut ((instruction as i32) & 0x3ff);
         if *offset > 512 {
             *offset -= 1024;
         }
@@ -466,7 +476,7 @@ impl Computer {
         } else if as_ == 1 { // Indexed Mode
             let offset: u16;
             if src_reg == 2 { // Special-Case Absolute Mode
-                offset = self.memory.get_word(self.pc.get_word()); // NOTE: not adding src reg
+                offset = self.memory.get_word(self.pc.get_word()); // not adding src reg
             } else {
                 offset = self.memory.get_word(self.pc.get_word()).wrapping_add(self.get_register(src_reg).get_word());
             }
@@ -512,7 +522,7 @@ impl Computer {
         let opc: SingleOperandOpcodes = SingleOperandOpcodes::try_from(opcode).unwrap();
         
         match opc {
-            SingleOperandOpcodes::RRC => { // NOTE: tested
+            SingleOperandOpcodes::RRC => { // tested
                 let carry: bool = (*src & 1) == 1;
                 *src >>= 1;
                 // put carry back in, taking into account byte-mode as bw
@@ -523,12 +533,12 @@ impl Computer {
                 self.sr.set_status(StatusFlags::ZERO, *src == 0);
                 self.sr.set_status(StatusFlags::OVERFLOW, false);
             },
-            SingleOperandOpcodes::SWPB => { // NOTE: tested
+            SingleOperandOpcodes::SWPB => { // tested
                 if !bw {
                     *src = ((*src & 0xff00) >> 8) | ((*src & 0xff) << 8);
                 }
             },
-            SingleOperandOpcodes::RRA => { // NOTE: tested
+            SingleOperandOpcodes::RRA => { // tested
                 self.sr.set_status(StatusFlags::CARRY, *src & 1 == 1);
                 let msb_to_or: u16 = *src & (if bw {128} else {32768});
                 *src >>= 1;
@@ -537,7 +547,7 @@ impl Computer {
                 self.sr.set_status(StatusFlags::ZERO, *src == 0);
                 self.sr.set_status(StatusFlags::OVERFLOW, false);
             },
-            SingleOperandOpcodes::SXT => { // NOTE: tested
+            SingleOperandOpcodes::SXT => { // tested
                 if !bw {
                     *src &= 0xff;
                     if (*src >> 7 & 1) == 1 {
@@ -551,7 +561,7 @@ impl Computer {
                     self.sr.set_status(StatusFlags::OVERFLOW, false);
                 }
             },
-            SingleOperandOpcodes::PUSH => { // NOTE: tested (indirectly) by other tests
+            SingleOperandOpcodes::PUSH => { // tested (indirectly) by other tests
                 let mut sp_word: u16 = self.sp.get_word();
                 match *wt {
                     WriteTargets::REGISTER(wt_reg) => {
@@ -579,7 +589,7 @@ impl Computer {
                     self.memory.set_word(sp_word, *src);
                 }
             },
-            SingleOperandOpcodes::CALL => { // TODO: test
+            SingleOperandOpcodes::CALL => { // tested
                 if !bw {
                     self.sp.set_word(self.sp.get_word().wrapping_sub(2));
                     self.memory.set_word(self.sp.get_word(), self.pc.get_word());
@@ -655,22 +665,22 @@ impl Computer {
         let cutoff: u32 = if bw {0xff} else {0xffff};
 
         match opc {
-            DoubleOperandOpcodes::MOV => { // NOTE: tested
+            DoubleOperandOpcodes::MOV => { // tested
                 *dst = src;
             },
-            DoubleOperandOpcodes::ADD => { // NOTE: tested
+            DoubleOperandOpcodes::ADD => { // tested
                 let prev_dst: u16 = *dst;
                 let full_dst: u32 = (*dst as u32) + (src as u32);
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
-            DoubleOperandOpcodes::ADDC => { // NOTE: tested
+            DoubleOperandOpcodes::ADDC => { // tested
                 let prev_dst: u16 = *dst;
                 let full_dst: u32 = (*dst as u32) + (src as u32) + (self.sr.get_status(StatusFlags::CARRY) as u32);
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
-            DoubleOperandOpcodes::SUBC => { // NOTE: Fuzzed
+            DoubleOperandOpcodes::SUBC => { // Fuzzed
                 let prev_dst: u16 = *dst;
                 // dst - src - 1 + sr(CARRY)
                 let full_dst: u32 = (*dst as u32).wrapping_sub(src as u32)
@@ -678,24 +688,24 @@ impl Computer {
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
-            DoubleOperandOpcodes::SUB => { // NOTE: tested & fuzzed
+            DoubleOperandOpcodes::SUB => { // tested & fuzzed
                 let prev_dst: u16 = *dst;
                 //println!("SUB running {} - {}", *dst, src);
                 let full_dst: u32 = (*dst as u32).wrapping_sub(src as u32);
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
-            DoubleOperandOpcodes::CMP => { // NOTE: not tested, but same impl as SUB
+            DoubleOperandOpcodes::CMP => { // not tested, but same impl as SUB
                 let prev_dst: u16 = *dst;
                 let full_dst: u32 = (*dst as u32).wrapping_sub(src as u32);
                 let fake_dst: u16 = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, fake_dst, bw);
                 *no_write = true;
             },
-            DoubleOperandOpcodes::DADD => { // NOTE: Doesn't need testing
+            DoubleOperandOpcodes::DADD => { // Doesn't need testing
                 panic!("AHhhhhhhhhhhhhhhhhhhh I have no clue how DADD works.");
             },
-            DoubleOperandOpcodes::BIT => { // NOTE: not tested, but same impl as AND
+            DoubleOperandOpcodes::BIT => { // not tested, but same impl as AND
                 let prev_dst: u16 = *dst;
                 let full_dst: u32 = (*dst & src) as u32;
                 let fake_dst: u16 = (full_dst & cutoff) as u16;
@@ -704,13 +714,13 @@ impl Computer {
                 self.sr.set_status(StatusFlags::OVERFLOW, false);
                 *no_write = true;
             },
-            DoubleOperandOpcodes::BIC => { // NOTE: tested
+            DoubleOperandOpcodes::BIC => { // tested
                 *dst &= !src;
             },
-            DoubleOperandOpcodes::BIS => { // NOTE: tested
+            DoubleOperandOpcodes::BIS => { // tested
                 *dst |= src;
             },
-            DoubleOperandOpcodes::XOR => { // NOTE: tested
+            DoubleOperandOpcodes::XOR => { // tested
                 let prev_dst: u16 = *dst;
                 *dst ^= src;
                 self.sr.set_status(StatusFlags::NEGATIVE, (*dst >> byte_int & 1) == 1);
@@ -718,7 +728,7 @@ impl Computer {
                 self.sr.set_status(StatusFlags::CARRY, *dst != 0);
                 self.sr.set_status(StatusFlags::OVERFLOW, (src >> byte_int & 1) == 1 && (prev_dst >> byte_int & 1) == 1);
             },
-            DoubleOperandOpcodes::AND => { // NOTE: tested
+            DoubleOperandOpcodes::AND => { // tested
                 *dst &= src;
                 self.sr.set_status(StatusFlags::NEGATIVE, (*dst >> byte_int & 1) == 1);
                 self.sr.set_status(StatusFlags::ZERO, *dst == 0);
@@ -738,7 +748,13 @@ impl Computer {
 
 
 fn main() {
-    println!("Shared memory!");
+    let args: CLI = CLI::parse();
+
+    match args {
+        CLI::Benchmark => run_benchmarks()
+    }
+
+    /*println!("Shared memory!");
 
     let a = StatusFlags::CARRY | StatusFlags::CPUOFF;
     println!("The following should be true:");
@@ -761,12 +777,54 @@ fn main() {
     println!("{:?}", mm._memory[0xffff]);
 
     let computer: &mut Computer = &mut Computer::new();
-    computer.step();
+    computer.step();*/
+}
+
+fn run_benchmarks() {
+    let rounds = 100_000_000;
+    let steps = 500;
+    let mut time_elapsed: u128 = 0;
+    
+    println!("Running {} rounds of {} steps each...", rounds, steps);
+    let assembled = utils::assemble(r#"
+.define "r5" A
+.define "r6" B
+.define "r15" OUT
+mov #0 [A]
+mov #1 [B]
+mov #0x4400 sp
+
+loop:
+add [A] [B] ; add value of A into B
+mov [B] [OUT] ; copy value of B into OUT
+add [B] [A] ; add value of B into A
+mov [A] [OUT] ; copy value of A into OUT
+jmp loop
+"#);
+    let trimmed = assembled.trim();
+
+    for _ in 0..rounds {
+        let c: &mut Computer = &mut Computer::new();
+        utils::execute(c, trimmed, 0);
+        let start = Instant::now();
+        for _ in 0..steps {
+            c.step();
+        }
+        let elapsed = start.elapsed();
+        time_elapsed += elapsed.as_micros();
+    }
+    let micros_per_cycle: f64 = (time_elapsed as f64) / (rounds as f64) / (steps as f64);
+    let hz = 1000000.0 / micros_per_cycle;
+    let khz = hz / 1000.0;
+    let mhz = khz / 1000.0;
+
+    println!("{} us/cycle ({} Hz, {} KHz, {} MHz)", micros_per_cycle, hz, khz, mhz);
 }
 
 #[cfg(test)]
 mod tests;
 
+pub(crate) mod utils;
 
 /*
 fn main() {
