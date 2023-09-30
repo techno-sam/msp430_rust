@@ -3,6 +3,9 @@ name: Deploy
 # https://dzfrias.dev/blog/deploy-rust-cross-platform-github-actions
 # https://jondot.medium.com/building-rust-on-multiple-platforms-using-github-6f3e6f8b8458
 
+permissions:
+  contents: write
+
 on:
   push:
     tags:
