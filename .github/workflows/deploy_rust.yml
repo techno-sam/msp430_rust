@@ -55,16 +55,16 @@ jobs:
       run: |
         # Replace with the name of your binary
         binary_name="msp430_rust"
-    
-        dirname="$binary_name-$\{\{ env.VERSION \}\}-$\{\{ matrix.target \}\}"
+
+        dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
         mkdir "$dirname"
-        if [ "$\{\{ matrix.os \}\}" = "windows-latest" ]; then
-          mv "target/$\{\{ matrix.target \}\}/release/$binary_name.exe" "$dirname"
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
         else
-          mv "target/$\{\{ matrix.target \}\}/release/$binary_name" "$dirname"
+          mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
         fi
-    
-        if [ "$\{\{ matrix.os \}\}" = "windows-latest" ]; then
+
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
           7z a "$dirname.zip" "$dirname"
           echo "ASSET=$dirname.zip" >> $GITHUB_ENV
         else
