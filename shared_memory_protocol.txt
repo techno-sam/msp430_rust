@@ -6,6 +6,7 @@ Emulator-controlled: (65568 bytes) (addresses 0x0 - 0x1001f)
 
 Commands (1 kb space):
   Command byte @ 0x10020
+  Follow-up specified below
 
 Command list:
 0. No command (set by emulator after a command is read)
