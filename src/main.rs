@@ -1,14 +1,18 @@
-use std::time::Instant;
+use std::{time::Instant, fs::File, io::Read, sync::{Arc, atomic::{AtomicBool, Ordering}}};
+use libc::c_char;
+use std::ffi::CStr;
+use std::str;
 
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 use clap::Parser;
-//use shared_memory::{Shmem, ShmemConf};
+use shared_memory::{ShmemConf, ShmemError};
 
 #[derive(Parser)]
 #[clap(author, version, about)]
 enum CLI {
     Benchmark,
+    Run
 }
 
 trait RegisterData {
@@ -296,7 +300,8 @@ impl<'a> WriteTarget for WriteTargets {
     fn set_byte(&mut self, value: u8, computer: &mut Computer) {
         match self {
             WriteTargets::VOID => {},
-            t => t.set_byte(value, computer),
+            WriteTargets::REGISTER(t) => t.set_byte(value, computer),
+            WriteTargets::MEMORY(t) => t.set_byte(value, computer),
         }
     }
 }
@@ -384,6 +389,21 @@ impl Computer {
             return &mut self.numbered_registers[(id - 4) as usize];
         }
     }
+
+    fn get_register_imut(&self, id: u8) -> &dyn RegisterData {
+        if id == 0 {
+            return &self.pc;
+        } else if id == 1 {
+            return &self.sp;
+        } else if id == 2 {
+            return &self.sr;
+        } else if id == 3 {
+            return &self.cg;
+        } else {
+            return &self.numbered_registers[(id - 4) as usize];
+        }
+    }
+
 
     fn step(&mut self) {
         let pc_w: u16 = self.pc.get_word();
@@ -746,14 +766,199 @@ impl Computer {
     }
 }
 
+fn file_as_byte_vec(filename: &String) -> Vec<u8> {
+    println!("Decoding file: '{}'", filename);
+    let mut f = File::open(&filename).expect("File not found");
+    let mut buf: Vec<u8> = Vec::new();
+    f.read_to_end(&mut buf).expect("Failed to read file");
+    return buf;
+}
+
+#[derive(Debug)]
+enum ShmemCommands {
+    None,
+    Stop,
+    Run,
+    Step(u16),
+    LoadFile(String),
+    Unknown
+}
+
+enum RunMode {
+    Stopped,
+    Running,
+    Stepping(u16)
+}
+
+struct SharedMemorySystem {
+    raw_ptr: *mut u8
+}
+impl SharedMemorySystem {
+    fn new(raw_ptr: *mut u8) -> SharedMemorySystem {
+        return SharedMemorySystem { raw_ptr };
+    }
+
+    fn write_byte(&mut self, idx: usize, value: u8) {
+        if idx >= 0x10420 {
+            panic!("Index error in write byte, {} is more than 65 kb", idx);
+        }
+        unsafe {
+            std::ptr::write_volatile(self.raw_ptr.add(idx), value);
+        }
+    }
+
+    fn read_byte(&self, idx: usize) -> u8 {
+        if idx >= 0x10420 {
+            panic!("Index error in read byte, {} is more than 65 kb", idx);
+        }
+        unsafe {
+            return std::ptr::read_volatile(self.raw_ptr.add(idx));
+        }
+    }
+
+    fn read_string(&self, idx: usize) -> String {
+        if idx >= 0x10420 {
+            panic!("Index error in read byte, {} is more than 65 kb", idx);
+        }
+        let c_buf: *const c_char = unsafe { self.raw_ptr.add(idx) } as *const c_char;
+        let c_str: &CStr = unsafe { CStr::from_ptr(c_buf) };
+        return c_str.to_str().unwrap().to_owned();
+    }
+
+    fn write(&mut self, computer: &Computer) {
+        for i in 0..=0xffffu16 {
+            self.write_byte(i as usize, computer.memory.get_byte(i));
+        }
+        for i in 0..=15 {
+            let reg_val: u16 = computer.get_register_imut(i).get_word();
+            let high: u8 = ((reg_val & 0xff00) >> 8) as u8;
+            let low: u8 = (reg_val & 0xff) as u8;
+            self.write_byte((i as usize)*2 + 0x10000, high);
+            self.write_byte((i as usize)*2 + 0x10000 + 1 , low);
+        }
+    }
+
+    fn get_command(&self) -> ShmemCommands {
+        const CMD: usize = 0x10020;
+        let cmd_id = self.read_byte(CMD);
+
+        return match cmd_id {
+            0 => ShmemCommands::None,
+            1 => ShmemCommands::Stop,
+            2 => ShmemCommands::Run,
+            3 => {
+                let high: u16 = self.read_byte(CMD + 1) as u16;
+                let low: u16 = self.read_byte(CMD + 2) as u16;
+                return ShmemCommands::Step((high << 8) | low);
+            },
+            4 => {
+                return ShmemCommands::LoadFile(self.read_string(CMD + 1));
+            },
+            _ => ShmemCommands::Unknown
+        };
+    }
+
+    fn acknowledge_command(&mut self) {
+        const CMD: usize = 0x10020;
+        self.write_byte(CMD, 0);
+    }
+}
+
+fn actually_run(running: Arc<AtomicBool>) {
+    let shmem_path = std::env::temp_dir().join("msp430_shmem_id");
+    let shmem_flink: &str = shmem_path.to_str().expect("Failed to get shared memory path");
+    // Create or open the shared memory mapping
+    let mut shmem = match ShmemConf::new().size(0x10420).flink(shmem_flink).create() {
+        Ok(m) => m,
+        Err(ShmemError::LinkExists) => {
+            eprintln!("Shared memory already exists, make sure msp430_rust is not already running");
+            ShmemConf::new().flink(shmem_flink).open().unwrap()
+        },
+        Err(e) => {
+            eprintln!(
+                "Unable to create or open shmem flink {} : {}",
+                shmem_flink, e
+            );
+            return;
+        }
+    };
+    shmem.set_owner(true);
+    println!("Shared memory id: {}", shmem.get_os_id());
+    println!("Shared memory id shared at: {}", shmem_flink);
+
+    // Get pointer to the shared memory
+    let raw_ptr: *mut u8 = shmem.as_ptr();
+
+    let mut mem = SharedMemorySystem::new(raw_ptr);
+
+    let mut run_mode: RunMode = RunMode::Stopped;
+
+    let c: &mut Computer = &mut Computer::new();
+    let mut iters: u128 = 0;
+    const CHECK_EVERY: u128 = 1_000_000;
+
+    while running.load(Ordering::SeqCst) { // ensure that shared memory is properly
+                                           // dropped before exit
+        let mut handle_commands: bool = false;
+        match run_mode {
+            RunMode::Stopped => handle_commands = true,
+            RunMode::Running => {
+                c.step();
+                iters += 1;
+            },
+            RunMode::Stepping(count) => {
+                if count <= 1 {
+                    run_mode = RunMode::Stopped;
+                } else {
+                    run_mode = RunMode::Stepping(count - 1);
+                }
+                c.step();
+                iters += 1;
+            }
+        }
+        if handle_commands || iters > CHECK_EVERY {
+            iters = 0;
+            let cmd = &mem.get_command();
+
+            match cmd {
+                ShmemCommands::None => {
+                    mem.write(c);
+                    continue;
+                },
+                ShmemCommands::Stop => run_mode = RunMode::Stopped,
+                ShmemCommands::Run => run_mode = RunMode::Running,
+                ShmemCommands::Step(n) => run_mode = RunMode::Stepping(*n),
+                ShmemCommands::LoadFile(path) => {
+                    c.reset();
+                    run_mode = RunMode::Stopped;
+                    let buf: Vec<u8> = file_as_byte_vec(&path);
+                    // load program into computer
+                    utils::execute_nr_nd(c, &buf, 0);
+                    println!("Computer pc: {}", c.get_register_imut(0).get_word());
+                },
+                ShmemCommands::Unknown => {},
+            };
+            
+            mem.acknowledge_command();
+            mem.write(c);
+            println!("Handled command: {:#?}", cmd);
+        }
+    }
+}
 
 fn main() {
     let args: CLI = CLI::parse();
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl-C handler");
 
     match args {
-        CLI::Benchmark => run_benchmarks()
+        CLI::Benchmark => run_benchmarks(),
+        CLI::Run => actually_run(running)
     }
-
     /*println!("Shared memory!");
 
     let a = StatusFlags::CARRY | StatusFlags::CPUOFF;
@@ -781,7 +986,7 @@ fn main() {
 }
 
 fn run_benchmarks() {
-    let rounds = 100_000_000;
+    let rounds = 1_000_000;
     let steps = 500;
     let mut time_elapsed: u128 = 0;
     

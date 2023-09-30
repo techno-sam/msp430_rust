@@ -69,6 +69,20 @@ mov &0xc0de r5
 }
 
 #[test]
+fn byte_mode() {
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble("
+mov #0xc0de r5
+mov.b r5 r6
+");
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 4);
+
+    assert_eq!(0x00de, c.get_register(6).get_word(), "Byte mode");
+}
+
+#[test]
 fn add_and_carry() {
     let c: &mut Computer = &mut Computer::new();
     let assembled = assemble("

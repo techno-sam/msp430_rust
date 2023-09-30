@@ -1,0 +1,15 @@
+Layout:
+
+Emulator-controlled: (65568 bytes) (addresses 0x0 - 0x1001f)
+  0x10000 (65536) bytes (64 kb) for memory map
+  32 bytes for registers (0x10000 - 0x1001f)
+
+Commands (1 kb space):
+  Command byte @ 0x10020
+
+Command list:
+0. No command (set by emulator after a command is read)
+1. Stop emulator (cycles = 0)
+2. Run emulator (cycles = infinity)
+3. Step emulator (next byte is # of steps)
+4. Load file, C-String path follows to .bin file

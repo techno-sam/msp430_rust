@@ -1,6 +1,6 @@
 use super::*;
 use base64::{Engine as _, engine::general_purpose};
-use std::io::prelude::*;
+use std::io::Write;
 use std::process::{Command, Stdio};
 
 #[allow(dead_code)]
