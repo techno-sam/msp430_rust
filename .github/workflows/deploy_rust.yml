@@ -25,14 +25,17 @@ jobs:
           - build: linux
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            do_cross: false
 
           - build: macos
             os: macos-latest
             target: x86_64-apple-darwin
+            do_cross: false
 
           - build: windows-gnu
             os: windows-latest
             target: x86_64-pc-windows-gnu
+            do_cross: false
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -50,7 +53,7 @@ jobs:
     - name: Build
       uses: actions-rs/cargo@v1
       with:
-        use-cross: true
+        use-cross: ${{ matrix.do_cross }}
         command: build
         args: --verbose --release --target ${{ matrix.target }}
     - name: Build archive
