@@ -601,18 +601,18 @@ impl Computer {
             },
             SingleOperandOpcodes::PUSH => { // tested (indirectly) by other tests
                 let mut sp_word: u16 = self.sp.get_word();
-                match *wt {
+                /*match *wt { // I don't think this did anything, let's just pretend for now
                     WriteTargets::REGISTER(wt_reg) => {
                         if wt_reg.register == 0 { // PC
                             if bw {
                                 *src = self.pc.get_byte() as u16;
                             } else {
-                                *src = sp_word;
+                                *src = self.pc.get_word();
                             }
                         }
                     },
                     _ => {}, // intentionally left blank
-                }
+                }// */
                 if sp_word <= 1 {
                     //panic!("MSP430 CPU Stack overflow");
                     sp_word += 0xffff - 2;
@@ -622,7 +622,7 @@ impl Computer {
                 self.sp.set_word(sp_word);
                 *no_write = true;
                 if bw {
-                    self.memory.set_byte(sp_word, (*src & 0xff) as u8);
+                    self.memory.set_byte(sp_word+1, (*src & 0xff) as u8);
                 } else {
                     self.memory.set_word(sp_word, *src);
                 }
