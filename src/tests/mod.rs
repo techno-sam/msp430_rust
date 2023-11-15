@@ -306,6 +306,36 @@ mov #0x0 r5 ; should never reach here
 }
 
 #[test]
+fn interrupts() {
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble("
+mov #0x4400 sp
+mov #2 r5 ; runs to here initially (2 steps), then interrupts
+inc r5; should continue here after interrupt
+
+handler:
+mov #6 r8
+reti
+
+; bind interrupt
+.interrupt 0xffa0 handler
+");
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 2);
+    assert_eq!(2, c.get_register(5).get_word(), "Pre-interrupt code operates properly");
+    // call interrupt
+    c.interrupt(0xffa0);
+    // execute mov and reti inside of interrupt
+    c.step();
+    c.step();
+    assert_eq!(6, c.get_register(8).get_word(), "Interrupt operates properly");
+    // execute post-interrupt instruction
+    c.step();
+    assert_eq!(3, c.get_register(5).get_word(), "Post-interrupt code operates properly");
+}
+
+#[test]
 fn jc_jhs() { // jump if carry is set
     let c: &mut Computer = &mut Computer::new();
     let assembled = assemble("

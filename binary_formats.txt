@@ -1,0 +1,13 @@
+Old:
+(2 bytes)         initial-pc
+(remaining bytes) program code/data, starting with address `initial-pc`
+
+New:
+(2 bytes) 0xffff fmt marker
+(2 bytes) segment_count
+[repeated `segment_count` times]
+  (2 bytes)                segment start address
+  (2 bytes)                segment_length
+  (`segment_length` bytes) program code/data
+
+NOTE: initial-pc is stored in address 0xfffe (high) and 0xffff (low)

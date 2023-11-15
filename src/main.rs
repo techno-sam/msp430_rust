@@ -147,6 +147,7 @@ bitflags! {
         const CARRY    = 0x001;
         const ZERO     = 0x002;
         const NEGATIVE = 0x004;
+        const GIE      = 0x008;
         const CPUOFF   = 0x010;
         const OVERFLOW = 0x100;
 
@@ -422,6 +423,17 @@ impl Computer {
         }
     }
 
+    fn interrupt(&mut self, id: u16) {
+        if self.sr.get_status(StatusFlags::GIE) { // only actually interrupt if interrupts are enabled
+            // push PC and SR onto the stack for restoring after the interrupt handler
+            self._push(self.pc.get_word(), false);
+            self._push(self.sr.get_word(), false);
+            // clear status register (setting GIE to 0)
+            self.sr.set_word(0);
+            // load interrupt vector into pc
+            self.pc.set_word(self.memory.get_word(id));
+        }
+    }
 
     fn step(&mut self) {
         let pc_w: u16 = self.pc.get_word();
@@ -541,6 +553,21 @@ impl Computer {
         }
     }
 
+    fn _push(&mut self, value: u16, bw: bool) {
+        let mut sp_word: u16 = self.sp.get_word();
+        if sp_word <= 1 {
+            sp_word += 0xffff - 2;
+        } else {
+            sp_word -= 2;
+        }
+        self.sp.set_word(sp_word);
+        if bw {
+            self.memory.set_byte(sp_word+1, (value & 0xff) as u8);
+        } else {
+            self.memory.set_word(sp_word, value);
+        }
+    }
+
     fn _execute_single_operand(&mut self, instruction: u16) { // PUSH implementation: decrement SP,
                                                               // then execute as usual
         let opcode: u8 = ((instruction >> 7) & 0x7) as u8; // 3-bit (0b111)
@@ -600,32 +627,8 @@ impl Computer {
                 }
             },
             SingleOperandOpcodes::PUSH => { // tested (indirectly) by other tests
-                let mut sp_word: u16 = self.sp.get_word();
-                /*match *wt { // I don't think this did anything, let's just pretend for now
-                    WriteTargets::REGISTER(wt_reg) => {
-                        if wt_reg.register == 0 { // PC
-                            if bw {
-                                *src = self.pc.get_byte() as u16;
-                            } else {
-                                *src = self.pc.get_word();
-                            }
-                        }
-                    },
-                    _ => {}, // intentionally left blank
-                }// */
-                if sp_word <= 1 {
-                    //panic!("MSP430 CPU Stack overflow");
-                    sp_word += 0xffff - 2;
-                } else {
-                    sp_word -= 2;
-                }
-                self.sp.set_word(sp_word);
+                self._push(*src, bw);
                 *no_write = true;
-                if bw {
-                    self.memory.set_byte(sp_word+1, (*src & 0xff) as u8);
-                } else {
-                    self.memory.set_word(sp_word, *src);
-                }
             },
             SingleOperandOpcodes::CALL => { // tested
                 if !bw {
@@ -635,8 +638,14 @@ impl Computer {
                     *no_write = true;
                 }
             },
-            SingleOperandOpcodes::RETI => { // TODO: IMPLEMENT INTERRUPTS
-                todo!();
+            SingleOperandOpcodes::RETI => { // tested
+                // pop SR
+                self.sr.set_word(self.memory.get_word(self.sp.get_word()));
+                self.sp.set_word(self.sp.get_word() + 2);
+
+                // pop PC
+                self.pc.set_word(self.memory.get_word(self.sp.get_word()));
+                self.sp.set_word(self.sp.get_word() + 2);
             }
         }
 
