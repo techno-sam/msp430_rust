@@ -436,6 +436,9 @@ impl Computer {
     }
 
     fn step(&mut self) {
+        if self.sr.get_status(StatusFlags::CPUOFF) {
+            return;
+        }
         let pc_w: u16 = self.pc.get_word();
         let instruction: u16 = self.memory.get_word(pc_w);
         self.pc.set_word(pc_w + 2);
