@@ -808,6 +808,8 @@ enum ShmemCommands {
     Run,
     Step(u16),
     LoadFile(String),
+    SetMem(u16, u16),
+    Interrupt(u16),
     Unknown
 }
 
@@ -880,6 +882,18 @@ impl SharedMemorySystem {
             },
             4 => {
                 return ShmemCommands::LoadFile(self.read_string(CMD + 1));
+            },
+            5 => {
+                let high_addr: u16 = self.read_byte(CMD + 1) as u16;
+                let low_addr: u16 = self.read_byte(CMD + 2) as u16;
+                let high_val: u16 = self.read_byte(CMD + 3) as u16;
+                let low_val: u16 = self.read_byte(CMD + 4) as u16;
+                return ShmemCommands::SetMem((high_addr << 8) | low_addr, (high_val << 8) | low_val);
+            },
+            6 => {
+                let high: u16 = self.read_byte(CMD + 1) as u16;
+                let low: u16 = self.read_byte(CMD + 2) as u16;
+                return ShmemCommands::Interrupt((high << 8) | low);
             },
             _ => ShmemCommands::Unknown
         };
@@ -958,10 +972,16 @@ fn actually_run(running: Arc<AtomicBool>) {
                 ShmemCommands::LoadFile(path) => {
                     c.reset();
                     run_mode = RunMode::Stopped;
-                    let buf: Vec<u8> = file_as_byte_vec(&path);
+                    let buf: Vec<u8> = file_as_byte_vec(path);
                     // load program into computer
                     utils::execute_nr_nd(c, &buf, 0);
                     println!("Computer pc: {}", c.get_register_imut(0).get_word());
+                },
+                &ShmemCommands::SetMem(addr, val) => {
+                    c.memory.set_word(addr, val);
+                },
+                &ShmemCommands::Interrupt(vector) => {
+                    c.interrupt(vector);
                 },
                 ShmemCommands::Unknown => {},
             };

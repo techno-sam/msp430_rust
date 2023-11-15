@@ -7,7 +7,7 @@ New:
 (2 bytes) segment_count
 [repeated `segment_count` times]
   (2 bytes)                segment start address
-  (2 bytes)                segment_length
+  (2 bytes)                segment_length (in bytes)
   (`segment_length` bytes) program code/data
 
 NOTE: initial-pc is stored in address 0xfffe (high) and 0xffff (low)
