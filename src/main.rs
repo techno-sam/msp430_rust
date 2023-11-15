@@ -218,13 +218,13 @@ impl MemoryMap {
 
     fn get_word(&self, index: u16) -> u16 {
         //assert_eq!(index % 2, 0);
-        return ((self._memory[index as usize] as u16) << 8u16) + (self._memory[index as usize + 1] as u16);
+        return ((self._memory[index as usize] as u16) << 8u16) + (self._memory[(index as usize + 1) & 0xffff] as u16);
     }
 
     fn set_word(&mut self, index: u16, value: u16) {
         //assert_eq!(index % 2, 0);
         self._memory[index as usize] = ((value >> 8) & 0xff) as u8;
-        self._memory[index as usize + 1] = (value & 0xff) as u8;
+        self._memory[(index as usize + 1) & 0xffff] = (value & 0xff) as u8;
     }
 
     fn get_byte(&self, index: u16) -> u8 {
