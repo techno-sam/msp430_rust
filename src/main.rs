@@ -25,12 +25,14 @@ use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 use clap::Parser;
 use shared_memory::{ShmemConf, ShmemError};
+use fork::{daemon, Fork};
 
 #[derive(Parser)]
 #[clap(author, version, about)]
 enum CLI {
     Benchmark,
-    Run
+    Run,
+    RunForked
 }
 
 trait RegisterData {
@@ -916,7 +918,8 @@ fn actually_run(running: Arc<AtomicBool>) {
         Ok(m) => m,
         Err(ShmemError::LinkExists) => {
             eprintln!("Shared memory already exists, make sure msp430_rust is not already running");
-            ShmemConf::new().flink(shmem_flink).open().unwrap()
+            return;
+            //ShmemConf::new().flink(shmem_flink).open().unwrap()
         },
         Err(e) => {
             eprintln!(
@@ -927,7 +930,10 @@ fn actually_run(running: Arc<AtomicBool>) {
         }
     };
     shmem.set_owner(true);
+
+    #[cfg(debug_assertions)]
     println!("Shared memory id: {}", shmem.get_os_id());
+    #[cfg(debug_assertions)]
     println!("Shared memory id shared at: {}", shmem_flink);
 
     // Get pointer to the shared memory
@@ -978,6 +984,7 @@ fn actually_run(running: Arc<AtomicBool>) {
                     let buf: Vec<u8> = file_as_byte_vec(path);
                     // load program into computer
                     utils::execute_nr_nd(c, &buf, 0);
+                    #[cfg(debug_assertions)]
                     println!("Computer pc: {}", c.get_register_imut(0).get_word());
                 },
                 &ShmemCommands::SetMem(addr, val) => {
@@ -991,13 +998,13 @@ fn actually_run(running: Arc<AtomicBool>) {
             
             mem.acknowledge_command();
             mem.write(c);
+            #[cfg(debug_assertions)]
             println!("Handled command: {:#?}", cmd);
         }
     }
 }
 
-fn main() {
-    let args: CLI = CLI::parse();
+fn run_wrapper() {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
@@ -1005,34 +1012,29 @@ fn main() {
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
 
+    actually_run(running);
+}
+
+fn fork_and_run() {
+    let result = daemon(false, true);
+    match result {
+        Ok(Fork::Child) => run_wrapper(),
+        Ok(Fork::Parent(child_pid)) => println!("{}", child_pid),
+        Err(_) => println!("Failed to fork"),
+    }
+    /*if let Ok(Fork::Parent(_)) = daemon(true, true) {
+        run_wrapper();
+    }*/
+}
+
+fn main() {
+    let args: CLI = CLI::parse();
+
     match args {
         CLI::Benchmark => run_benchmarks(),
-        CLI::Run => actually_run(running)
+        CLI::Run => run_wrapper(),
+        CLI::RunForked => fork_and_run(),
     }
-    /*println!("Shared memory!");
-
-    let a = StatusFlags::CARRY | StatusFlags::CPUOFF;
-    println!("The following should be true:");
-    println!("{:?}", a.contains(StatusFlags::CARRY));
-    println!("The following should be false:");
-    println!("{:#?}", a.contains(StatusFlags::ZERO));
-
-    println!("The following should be true:");
-    println!("{:?}", (0x003 & StatusFlags::ZERO.to_owned().bits()) != 0);
-
-    let reg: &mut dyn RegisterData = &mut BasicRegister {
-        id: 4,
-        _value: 41
-    };
-
-    reg.set_word(4);
-
-    let mm: &mut MemoryMap = &mut MemoryMap::new();
-
-    println!("{:?}", mm._memory[0xffff]);
-
-    let computer: &mut Computer = &mut Computer::new();
-    computer.step();*/
 }
 
 fn run_benchmarks() {
