@@ -16,7 +16,7 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{time::Instant, fs::File, io::Read, sync::{Arc, atomic::{AtomicBool, Ordering}}};
+use std::{time::Instant, fs::File, io::Read, sync::{Arc, atomic::{AtomicBool, Ordering}}, env, process::{self}};
 use libc::c_char;
 use std::ffi::CStr;
 use std::str;
@@ -25,7 +25,6 @@ use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 use clap::Parser;
 use shared_memory::{ShmemConf, ShmemError};
-use fork::{daemon, Fork};
 use sysinfo::{System, SystemExt, Pid};
 
 #[derive(Parser)]
@@ -33,8 +32,8 @@ use sysinfo::{System, SystemExt, Pid};
 enum CLI {
     /// benchmark code (only in dev env)
     Benchmark,
-    /// Run emulator in foreground
-    Run,
+    /// Run emulator in foreground [PARENT_PID]
+    Run(RunForkedArgs),
     /// Run emulator in separate process [PARENT_PID]
     RunForked(RunForkedArgs),
 }
@@ -921,7 +920,6 @@ impl SharedMemorySystem {
 }
 
 fn actually_run(running: Arc<AtomicBool>, parent_pid: Option<u64>) {
-    let s = System::new_all();
     let shmem_path = std::env::temp_dir().join("msp430_shmem_id");
     let shmem_flink: &str = shmem_path.to_str().expect("Failed to get shared memory path");
     // Create or open the shared memory mapping
@@ -981,6 +979,21 @@ fn actually_run(running: Arc<AtomicBool>, parent_pid: Option<u64>) {
             iters = 0;
             let cmd = &mem.get_command();
 
+            let s = System::new_all();
+            match parent_pid {
+                Some(pid) => {
+                    match s.process(Pid::from(pid as usize)) {
+                        Some(_) => {},
+                        None => {
+                            println!("Parent process death detected");
+                            running.store(false, Ordering::SeqCst);
+                            return;
+                        },
+                    }
+                },
+                None => {},
+            };
+
             match cmd {
                 ShmemCommands::None => {
                     mem.write(c);
@@ -1011,18 +1024,6 @@ fn actually_run(running: Arc<AtomicBool>, parent_pid: Option<u64>) {
             mem.write(c);
             #[cfg(debug_assertions)]
             println!("Handled command: {:#?}", cmd);
-
-            match parent_pid {
-                Some(pid) => {
-                    match s.process(Pid::from(pid as usize)) {
-                        Some(_) => {},
-                        None => {
-                            return;
-                        },
-                    }
-                },
-                None => {},
-            };
         }
     }
 }
@@ -1039,12 +1040,27 @@ fn run_wrapper(parent_pid: Option<u64>) {
 }
 
 fn fork_and_run(parent_pid: Option<u64>) {
-    let result = daemon(false, true);
+    /*let result = daemon(false, true);
     match result {
         Ok(Fork::Child) => run_wrapper(parent_pid),
         Ok(Fork::Parent(child_pid)) => println!("{}", child_pid),
         Err(_) => println!("Failed to fork"),
-    }
+    }*/
+    let mut command = process::Command::new(env::current_exe().expect("current_exe() failed, cannot fork"));
+    match parent_pid {
+        Some(pid) => command.args(["run", &pid.to_string()]),
+        None => command.args(["run"]),
+    };
+    let child_res = command.stdin(process::Stdio::null())
+        .stdout(process::Stdio::null())
+        .stderr(process::Stdio::null())
+        .spawn();
+
+    match child_res {
+        Ok(_child) => {},
+        Err(_) => {},
+    };
+
     /*if let Ok(Fork::Parent(_)) = daemon(true, true) {
         run_wrapper();
     }*/
@@ -1055,7 +1071,7 @@ fn main() {
 
     match args {
         CLI::Benchmark => run_benchmarks(),
-        CLI::Run => run_wrapper(Option::None),
+        CLI::Run(args) => run_wrapper(args.parent_pid),
         CLI::RunForked(args) => fork_and_run(args.parent_pid),
     }
 }
