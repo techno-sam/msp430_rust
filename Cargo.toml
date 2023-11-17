@@ -1,6 +1,6 @@
 [package]
 name = "msp430_rust"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 description = "An emulator for the MSP430-2xx series computer chip"
 authors = ["Sam Wagenaar"]
@@ -19,6 +19,7 @@ num_enum = "0.7.0"
 clap = { version = "4.4.5", features = ["derive"] }
 ctrlc = "3.4.1"
 fork = "0.1.22"
+sysinfo = "0.29.10"
 
 [profile.dev]
 opt-level = 2

@@ -26,13 +26,23 @@ use num_enum::TryFromPrimitive;
 use clap::Parser;
 use shared_memory::{ShmemConf, ShmemError};
 use fork::{daemon, Fork};
+use sysinfo::{System, SystemExt, Pid};
 
 #[derive(Parser)]
 #[clap(author, version, about)]
 enum CLI {
+    /// benchmark code (only in dev env)
     Benchmark,
+    /// Run emulator in foreground
     Run,
-    RunForked
+    /// Run emulator in separate process [PARENT_PID]
+    RunForked(RunForkedArgs),
+}
+
+#[derive(Parser)]
+struct RunForkedArgs {
+    /// Process to listen for
+    parent_pid: Option<u64>
 }
 
 trait RegisterData {
@@ -910,7 +920,8 @@ impl SharedMemorySystem {
     }
 }
 
-fn actually_run(running: Arc<AtomicBool>) {
+fn actually_run(running: Arc<AtomicBool>, parent_pid: Option<u64>) {
+    let s = System::new_all();
     let shmem_path = std::env::temp_dir().join("msp430_shmem_id");
     let shmem_flink: &str = shmem_path.to_str().expect("Failed to get shared memory path");
     // Create or open the shared memory mapping
@@ -1000,11 +1011,23 @@ fn actually_run(running: Arc<AtomicBool>) {
             mem.write(c);
             #[cfg(debug_assertions)]
             println!("Handled command: {:#?}", cmd);
+
+            match parent_pid {
+                Some(pid) => {
+                    match s.process(Pid::from(pid as usize)) {
+                        Some(_) => {},
+                        None => {
+                            return;
+                        },
+                    }
+                },
+                None => {},
+            };
         }
     }
 }
 
-fn run_wrapper() {
+fn run_wrapper(parent_pid: Option<u64>) {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
@@ -1012,13 +1035,13 @@ fn run_wrapper() {
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
 
-    actually_run(running);
+    actually_run(running, parent_pid);
 }
 
-fn fork_and_run() {
+fn fork_and_run(parent_pid: Option<u64>) {
     let result = daemon(false, true);
     match result {
-        Ok(Fork::Child) => run_wrapper(),
+        Ok(Fork::Child) => run_wrapper(parent_pid),
         Ok(Fork::Parent(child_pid)) => println!("{}", child_pid),
         Err(_) => println!("Failed to fork"),
     }
@@ -1032,8 +1055,8 @@ fn main() {
 
     match args {
         CLI::Benchmark => run_benchmarks(),
-        CLI::Run => run_wrapper(),
-        CLI::RunForked => fork_and_run(),
+        CLI::Run => run_wrapper(Option::None),
+        CLI::RunForked(args) => fork_and_run(args.parent_pid),
     }
 }
 
