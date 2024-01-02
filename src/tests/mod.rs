@@ -89,6 +89,27 @@ mov &0xc0de r5
 }
 
 #[test]
+fn symbolic_arg_mode() {
+    let c: &mut Computer = &mut Computer::new();
+    let assembled = assemble("
+mov #0xf00d 0xc0de
+setc
+mov 0xc0de r5
+");
+    let trimmed = assembled.trim();
+    println!("'{}'", trimmed);
+    execute(c, &trimmed, 4);
+    
+    for offset in -4isize..=4 {
+        println!("[0xc0de {}]: {}", offset, c.memory.get_word((0xc0de+offset) as u16));
+    }
+    println!("{} at 0xc0de+2", c.memory.get_word(0xc0de-1));
+
+    assert_eq!(0xf00d, c.memory.get_word(0xc0de), "Symbolic as target");
+    assert_eq!(0xf00d, c.get_register(5).get_word(), "Symbolic as source");
+}
+
+#[test]
 fn byte_mode() {
     let c: &mut Computer = &mut Computer::new();
     let assembled = assemble("
