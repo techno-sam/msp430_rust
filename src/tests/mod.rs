@@ -75,12 +75,14 @@ mov #8 r15
 fn absolute_arg_mode() {
     let c: &mut Computer = &mut Computer::new();
     let assembled = assemble("
+setn ; absolute mode uses sr (r2) as a special case, fuzz it
 mov #0xf00d &0xc0de
+setc
 mov &0xc0de r5
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 2);
+    execute(c, &trimmed, 4);
 
     assert_eq!(0xf00d, c.memory.get_word(0xc0de), "Absolute as target");
     assert_eq!(0xf00d, c.get_register(5).get_word(), "Absolute as source");

@@ -470,6 +470,14 @@ impl Computer {
         }
     }
 
+    fn _print_flags(&self) {
+        println!("Flags:");
+        println!("\t N: {}", self.sr.get_status(StatusFlags::NEGATIVE));
+        println!("\t Z: {}", self.sr.get_status(StatusFlags::ZERO));
+        println!("\t C: {}", self.sr.get_status(StatusFlags::CARRY));
+        println!("\t V: {}", self.sr.get_status(StatusFlags::OVERFLOW));
+    }
+
     fn _execute_jump(&mut self, instruction: u16) { // all of this is tested
         let offset: &mut i32 = &mut ((instruction as i32) & 0x3ff);
         if *offset > 512 {
@@ -487,7 +495,12 @@ impl Computer {
                 if self.sr.get_status(StatusFlags::CARRY) {return;}
             },
             3 => { // JC/JHS
-                if !self.sr.get_status(StatusFlags::CARRY) {return;}
+                println!("JHS");
+                if !self.sr.get_status(StatusFlags::CARRY) {
+                    println!("Continuing");
+                    return;
+                }
+                println!("Jumping");
             },
             4 => { // JN
                 if !self.sr.get_status(StatusFlags::NEGATIVE) {return;}
@@ -641,6 +654,7 @@ impl Computer {
                 }
             },
             SingleOperandOpcodes::PUSH => { // tested (indirectly) by other tests
+                println!("Pushing {}", *src);
                 self._push(*src, bw);
                 *no_write = true;
             },
@@ -653,13 +667,19 @@ impl Computer {
                 }
             },
             SingleOperandOpcodes::RETI => { // tested
+                println!("RETI");
+                let popped_sr: u16 = self.memory.get_word(self.sp.get_word());
+                println!("setting SR to {}", popped_sr);
                 // pop SR
-                self.sr.set_word(self.memory.get_word(self.sp.get_word()));
+                self.sr.set_word(popped_sr);
                 self.sp.set_word(self.sp.get_word() + 2);
 
+                let popped_pc = self.memory.get_word(self.sp.get_word());
+                println!("Setting PC to {}", popped_pc);
                 // pop PC
-                self.pc.set_word(self.memory.get_word(self.sp.get_word()));
+                self.pc.set_word(popped_pc);
                 self.sp.set_word(self.sp.get_word() + 2);
+                *no_write = true;
             }
         }
 
@@ -693,6 +713,10 @@ impl Computer {
         let dst_reg: u8 = (instruction & 0xf) as u8;        // 4-bit
         let byte_int: u16 = if bw {7} else {15};
 
+        if opcode < 4 { // don't try to execute nonexistent opcodes
+            return;
+        }
+
         // read source
         let (src, _) = self._get_src(src_reg, as_, bw);
 
@@ -707,7 +731,12 @@ impl Computer {
             }
             *wt = RegisterWriteTarget::new(dst_reg);
         } else {
-            let offset: u16 = self.memory.get_word(self.pc.get_word()) + self.get_register(dst_reg).get_word();
+            let offset: u16;
+            if dst_reg == 2 { // Special-Case Absolute Mode
+                offset = self.memory.get_word(self.pc.get_word()); // not adding dst reg
+            } else {
+                offset = self.memory.get_word(self.pc.get_word()).wrapping_add(self.get_register(dst_reg).get_word());
+            }
             self.pc.set_word(self.pc.get_word() + 2);
             if bw {
                 *dst = self.memory.get_byte(offset) as u16;
@@ -743,24 +772,31 @@ impl Computer {
             },
             DoubleOperandOpcodes::SUBC => { // Fuzzed
                 let prev_dst: u16 = *dst;
-                // dst - src - 1 + sr(CARRY)
-                let full_dst: u32 = (*dst as u32).wrapping_sub(src as u32)
-                    .wrapping_sub(1).wrapping_add(self.sr.get_status(StatusFlags::CARRY) as u32);
+                // dst - src - 1 + sr(CARRY) X old
+                // dst + !src + sr(CARRY) <---
+                let not_src: u16 = !src;
+                let full_dst: u32 = (*dst as u32).wrapping_add(not_src as u32)
+                    .wrapping_add(self.sr.get_status(StatusFlags::CARRY) as u32);
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
             DoubleOperandOpcodes::SUB => { // tested & fuzzed
                 let prev_dst: u16 = *dst;
                 //println!("SUB running {} - {}", *dst, src);
-                let full_dst: u32 = (*dst as u32).wrapping_sub(src as u32);
+                let not_src: u16 = !src;
+                let full_dst: u32 = (*dst as u32).wrapping_add(not_src as u32).wrapping_add(1);
                 *dst = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
             DoubleOperandOpcodes::CMP => { // not tested, but same impl as SUB
+                println!("CMP {} {}", src, *dst);
                 let prev_dst: u16 = *dst;
-                let full_dst: u32 = (*dst as u32).wrapping_sub(src as u32);
+                let not_src: u16 = !src;
+                let full_dst: u32 = (*dst as u32).wrapping_add(not_src as u32).wrapping_add(1);
+                // println!("still CMP, ({}).wrapping_sub({}) = {}", *dst as u32, src as u32, full_dst);
                 let fake_dst: u16 = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, fake_dst, bw);
+                self._print_flags();
                 *no_write = true;
             },
             DoubleOperandOpcodes::DADD => { // Doesn't need testing
