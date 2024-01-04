@@ -495,12 +495,12 @@ impl Computer {
                 if self.sr.get_status(StatusFlags::CARRY) {return;}
             },
             3 => { // JC/JHS
-                println!("JHS");
+                //println!("JHS");
                 if !self.sr.get_status(StatusFlags::CARRY) {
-                    println!("Continuing");
+                    //println!("Continuing");
                     return;
                 }
-                println!("Jumping");
+                //println!("Jumping");
             },
             4 => { // JN
                 if !self.sr.get_status(StatusFlags::NEGATIVE) {return;}
@@ -654,7 +654,7 @@ impl Computer {
                 }
             },
             SingleOperandOpcodes::PUSH => { // tested (indirectly) by other tests
-                println!("Pushing {}", *src);
+                //println!("Pushing {}", *src);
                 self._push(*src, bw);
                 *no_write = true;
             },
@@ -789,7 +789,7 @@ impl Computer {
                 self._set_flags(src, prev_dst, full_dst, *dst, bw);
             },
             DoubleOperandOpcodes::CMP => { // not tested, but same impl as SUB
-                println!("CMP {} {}", src, *dst);
+                //println!("CMP {} {}", src, *dst);
                 let prev_dst: u16 = *dst;
                 let not_src: u16 = !src;
                 let full_dst: u32 = (*dst as u32).wrapping_add(not_src as u32).wrapping_add(1);

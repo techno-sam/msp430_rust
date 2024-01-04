@@ -271,7 +271,7 @@ dependencies = [
 
 [[package]]
 name = "msp430_rust"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "base64",
  "bitflags 2.4.0",
