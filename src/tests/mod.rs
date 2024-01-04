@@ -114,13 +114,19 @@ fn byte_mode() {
     let c: &mut Computer = &mut Computer::new();
     let assembled = assemble("
 mov #0xc0de r5
+mov #0xf00d r6
 mov.b r5 r6
+
+add.b #10 r8
+mov.b #42 r7
 ");
     let trimmed = assembled.trim();
     println!("'{}'", trimmed);
-    execute(c, &trimmed, 4);
+    execute(c, &trimmed, 5);
 
     assert_eq!(0x00de, c.get_register(6).get_word(), "Byte mode");
+    assert_eq!(42, c.get_register(7).get_word(), "Byte mode literals");
+    assert_eq!(10, c.get_register(8).get_word(), "Byte mode adding");
 }
 
 #[test]
