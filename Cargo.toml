@@ -1,6 +1,6 @@
 [package]
 name = "msp430_rust"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 description = "An emulator for the MSP430-2xx series computer chip"
 authors = ["Sam Wagenaar"]

@@ -796,7 +796,7 @@ impl Computer {
                 // println!("still CMP, ({}).wrapping_sub({}) = {}", *dst as u32, src as u32, full_dst);
                 let fake_dst: u16 = (full_dst & cutoff) as u16;
                 self._set_flags(src, prev_dst, full_dst, fake_dst, bw);
-                self._print_flags();
+                //self._print_flags();
                 *no_write = true;
             },
             DoubleOperandOpcodes::DADD => { // Doesn't need testing
